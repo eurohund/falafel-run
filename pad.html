@@ -1,0 +1,162 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>Falafel Run pad</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Rubik:wght@500;800&family=Rubik+Mono+One&display=swap" rel="stylesheet">
+<style>
+  /* Phone pad: the whole screen is one button. */
+  :root {
+    color-scheme: dark;
+    --night: #160d33;
+    --ink: #fff4e6;
+    --go: #29d3c2;
+    --jump: #ff3d8b;
+    --tone: var(--go);
+    --display: "Rubik Mono One", "Rubik", "Arial Black", sans-serif;
+    --body: "Rubik", "Helvetica Neue", Arial, sans-serif;
+  }
+  body.jump { --tone: var(--jump); }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  body {
+    display: flex; flex-direction: column; gap: 12px; padding: 16px;
+    background: var(--night); color: var(--ink); font-family: var(--body);
+    overflow: hidden; touch-action: none;
+    -webkit-user-select: none; user-select: none;
+    -webkit-touch-callout: none; -webkit-tap-highlight-color: transparent;
+  }
+  #status { text-align: center; font-weight: 800; font-size: 15px; min-height: 20px; }
+  #btn {
+    flex: 1; min-height: 0; border: 0; border-radius: 32px;
+    display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px;
+    background: var(--tone); color: var(--night);
+    font-family: var(--display); font-size: 44px;
+    box-shadow: 0 12px 0 rgba(0,0,0,.4);
+    transition: transform .04s, box-shadow .04s, filter .04s;
+    touch-action: none;
+  }
+  #btn svg { width: 120px; height: 120px; }
+  #btn.on { transform: translateY(9px); box-shadow: 0 3px 0 rgba(0,0,0,.4); filter: brightness(1.2); }
+  #btn:disabled { background: #3a2f5c; color: var(--ink); font-size: 22px; padding: 24px; line-height: 1.3; }
+  #btn:disabled svg { display: none; }
+  #btn:focus-visible { outline: 3px solid var(--ink); outline-offset: 3px; }
+  @media (prefers-reduced-motion: reduce) { #btn { transition: none; } }
+</style>
+</head>
+<body>
+  <div id="status">Connecting…</div>
+  <button id="btn" type="button">
+    <svg id="icon" viewBox="0 0 48 48" aria-hidden="true"><path id="iconPath" d="M6 19h20V8l18 16-18 16V29H6z" fill="currentColor"/></svg>
+    <span id="label">GO</span>
+  </button>
+
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-database-compat.js"></script>
+<script src="firebase-config.js"></script>
+<script>
+(function () {
+  'use strict';
+  var q = new URLSearchParams(location.search);
+  var room = (q.get('r') || '').toLowerCase();
+  var role = q.get('k') === 'jump' ? 'jump' : 'go';
+  var btn = document.getElementById('btn'), label = document.getElementById('label');
+  var statusEl = document.getElementById('status');
+
+  if (role === 'jump') {
+    document.body.classList.add('jump');
+    document.getElementById('iconPath').setAttribute('d', 'M19 42V22H8L24 4l16 18H29v20z');
+  }
+  var NAME = role === 'jump' ? 'JUMP' : 'GO';
+  label.textContent = NAME;
+  document.addEventListener('contextmenu', function (e) { e.preventDefault(); });
+
+  function fail(text) { statusEl.textContent = ''; btn.disabled = true; label.textContent = text; }
+
+  var cfg = window.FIREBASE_CONFIG;
+  if (!/^[a-z0-9]{6}$/.test(room)) { fail('Scan the code on the TV again'); return; }
+  if (!cfg || !cfg.databaseURL || typeof firebase === 'undefined') { fail('The game is not set up yet'); return; }
+
+  firebase.initializeApp(cfg);
+  var db = firebase.database();
+  var node = db.ref('rooms/' + room + '/' + role);
+  var id = Math.random().toString(36).slice(2, 10);
+  var wantIt = true;     // this phone is trying to hold the button
+  var mine = false;      // the database agrees
+  var connected = false;
+  var down = false;
+
+  function ui() {
+    if (!connected) { statusEl.textContent = 'Connecting…'; label.textContent = NAME; return; }
+    if (mine) {
+      statusEl.textContent = role === 'go' ? 'You drive. Hold the button.' : 'You jump. Tap the button.';
+      label.textContent = NAME;
+    } else if (!wantIt) {
+      statusEl.textContent = 'Someone took your button';
+      label.textContent = 'TAKE IT BACK';
+    } else {
+      statusEl.textContent = 'Connecting…'; label.textContent = NAME;
+    }
+  }
+
+  function claim() {
+    wantIt = true;
+    node.onDisconnect().remove();
+    node.set({ owner: id, down: false, n: 0 });
+  }
+
+  db.ref('.info/connected').on('value', function (s) {
+    connected = !!s.val();
+    if (connected && wantIt) claim();
+    ui();
+  });
+
+  node.child('owner').on('value', function (s) {
+    var o = s.val();
+    if (o === id) { mine = true; }
+    else {
+      mine = false; down = false; btn.classList.remove('on');
+      if (o && wantIt) { wantIt = false; node.onDisconnect().cancel(); }   // taken over
+      else if (!o && wantIt && connected) claim();                         // room was reset
+    }
+    ui();
+  });
+
+  function buzz(ms) { try { if (navigator.vibrate) navigator.vibrate(ms); } catch (e) {} }
+  var wake = null;
+  function keepAwake() {
+    try {
+      if (!wake && navigator.wakeLock) navigator.wakeLock.request('screen').then(function (w) {
+        wake = w; w.addEventListener('release', function () { wake = null; });
+      }).catch(function () {});
+    } catch (e) {}
+  }
+
+  function press(e) {
+    e.preventDefault();
+    try { btn.setPointerCapture(e.pointerId); } catch (err) {}
+    keepAwake();
+    if (!wantIt) { claim(); buzz(30); return; }
+    if (!mine) return;
+    btn.classList.add('on'); buzz(15);
+    if (role === 'go') { down = true; node.child('down').set(true); }
+    else node.child('n').set(Date.now());
+  }
+  function release() {
+    btn.classList.remove('on');
+    if (role === 'go' && down) { down = false; if (mine) node.child('down').set(false); }
+  }
+  btn.addEventListener('pointerdown', press);
+  btn.addEventListener('pointerup', release);
+  btn.addEventListener('pointercancel', release);
+  btn.addEventListener('lostpointercapture', release);
+  document.addEventListener('visibilitychange', function () { if (document.hidden) release(); else keepAwake(); });
+
+  ui();
+})();
+</script>
+</body>
+</html>

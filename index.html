@@ -1,0 +1,182 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Falafel Run</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Rubik:wght@500;800&family=Rubik+Mono+One&display=swap" rel="stylesheet">
+<style>
+  /* TV screen: game stage on top, a dock below with one QR code per role. */
+  :root {
+    color-scheme: dark;
+    --night: #160d33;
+    --ink: #fff4e6;
+    --hero: #ffd23f;
+    --go: #29d3c2;
+    --jump: #ff3d8b;
+    --card: rgba(22, 13, 51, 0.82);
+    --display: "Rubik Mono One", "Rubik", "Arial Black", sans-serif;
+    --body: "Rubik", "Helvetica Neue", Arial, sans-serif;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  body {
+    display: flex; flex-direction: column;
+    background: var(--night); color: var(--ink);
+    font-family: var(--body); overflow: hidden;
+  }
+  #stage { position: relative; flex: 1; min-height: 0; }
+  #game { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+
+  #hud {
+    position: absolute; left: 3vw; right: 3vw; top: 3vh;
+    display: flex; justify-content: space-between; align-items: flex-start;
+    font-variant-numeric: tabular-nums;
+  }
+  #meters { font-family: var(--display); font-size: 7vh; line-height: 1; text-shadow: 0 .5vh 0 rgba(22,13,51,.55); }
+  #meters small { font-size: 3.2vh; margin-left: .6vh; }
+  #best { font-weight: 800; font-size: 2.6vh; padding: 1vh 2vh; border-radius: 999px; background: var(--card); }
+
+  #msg { position: absolute; left: 0; right: 0; top: 16%; display: flex; justify-content: center; }
+  #msg[hidden] { display: none; }
+  #card {
+    max-width: 60vw; padding: 3vh 4vh; border-radius: 3vh;
+    background: var(--card); text-align: center;
+    border: 2px solid rgba(255, 244, 230, .16);
+  }
+  #card h1 { margin: 0 0 1.4vh; font-family: var(--display); font-weight: 400; font-size: 5.4vh; line-height: 1.1; color: var(--hero); }
+  #card p { margin: 0; font-size: 3vh; line-height: 1.35; font-weight: 500; }
+  #card p + p { margin-top: 1vh; opacity: .75; font-size: 2.4vh; }
+
+  #dock {
+    display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; gap: 3vw;
+    height: 26vh; padding: 2vh 3vw; background: var(--night);
+  }
+  .role { display: flex; align-items: center; gap: 2vw; min-width: 0; }
+  .role.right { flex-direction: row-reverse; text-align: right; }
+  .qr {
+    height: 22vh; width: 22vh; flex: none; padding: 1vh; border-radius: 2vh;
+    background: #fff; border: .8vh solid var(--go);
+  }
+  .role.right .qr { border-color: var(--jump); }
+  .qr svg { display: block; width: 100%; height: 100%; }
+  .role h2 { margin: 0; font-family: var(--display); font-weight: 400; font-size: 5.6vh; line-height: 1; color: var(--go); }
+  .role.right h2 { color: var(--jump); }
+  .role p { margin: 1vh 0 0; font-size: 2.6vh; font-weight: 500; }
+  .state { display: inline-block; margin-top: 1.2vh; padding: .6vh 1.6vh; border-radius: 999px; font-weight: 800; font-size: 2.2vh; background: rgba(255,244,230,.14); }
+  .state.taken { background: var(--ink); color: var(--night); }
+  #mid { text-align: center; font-size: 2.4vh; font-weight: 500; opacity: .8; max-width: 26vw; }
+  #mid b { display: block; font-family: var(--display); font-weight: 400; font-size: 3vh; opacity: 1; margin-bottom: .8vh; }
+</style>
+</head>
+<body>
+  <div id="stage">
+    <canvas id="game" aria-label="Game: a character runs away from a giant falafel"></canvas>
+    <div id="hud">
+      <div id="meters">0<small>m</small></div>
+      <div id="best">best 0 m</div>
+    </div>
+    <div id="msg">
+      <div id="card">
+        <h1 id="msgTitle">Falafel Run</h1>
+        <p id="msgText">Scan a code with your phone. One drives, one jumps.</p>
+        <p id="msgHint">Playing alone? The bot takes the other button.</p>
+      </div>
+    </div>
+  </div>
+
+  <div id="dock">
+    <div class="role">
+      <div class="qr" id="qrGo"></div>
+      <div>
+        <h2>GO</h2>
+        <p>Hold to move forward</p>
+        <span class="state" id="stGo">free</span>
+      </div>
+    </div>
+    <div id="mid"><b id="midTitle">Scan to play</b><span id="midText">A taken code can be stolen: just scan it.</span></div>
+    <div class="role right">
+      <div class="qr" id="qrJump"></div>
+      <div>
+        <h2>JUMP</h2>
+        <p>Tap to jump</p>
+        <span class="state" id="stJump">free</span>
+      </div>
+    </div>
+  </div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcode-generator/1.4.4/qrcode.min.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-database-compat.js"></script>
+<script src="firebase-config.js"></script>
+<script src="game.js"></script>
+<script>
+(function () {
+  'use strict';
+  var stGo = document.getElementById('stGo'), stJump = document.getElementById('stJump');
+  var midTitle = document.getElementById('midTitle'), midText = document.getElementById('midText');
+
+  // Room code: stays the same across reloads of this TV.
+  var room = null;
+  try { room = localStorage.getItem('falafel-room'); } catch (e) {}
+  if (!room || !/^[a-z0-9]{6}$/.test(room)) {
+    room = Math.random().toString(36).slice(2, 8).padEnd(6, '0');
+    try { localStorage.setItem('falafel-room', room); } catch (e) {}
+  }
+
+  var base = location.href.split('#')[0].split('?')[0].replace(/[^\/]*$/, '');
+  function padUrl(k) { return base + 'pad.html?r=' + room + '&k=' + k; }
+  function renderQr(el, url) {
+    try {
+      var qr = qrcode(0, 'M'); qr.addData(url); qr.make();
+      el.innerHTML = qr.createSvgTag({ cellSize: 4, margin: 0, scalable: true });
+    } catch (e) { el.textContent = url; }
+  }
+  renderQr(document.getElementById('qrGo'), padUrl('go'));
+  renderQr(document.getElementById('qrJump'), padUrl('jump'));
+
+  var cfg = window.FIREBASE_CONFIG;
+  if (!cfg || !cfg.databaseURL || typeof firebase === 'undefined') {
+    midTitle.textContent = 'Phones are not linked yet';
+    midText.textContent = 'Fill in firebase-config.js. Keyboard works: Right arrow and Space.';
+    return;
+  }
+
+  firebase.initializeApp(cfg);
+  var ref = firebase.database().ref('rooms/' + room);
+  var goOwner = null, jumpOwner = null, goIsDown = false, lastN = null, firstJump = true;
+
+  function refresh() {
+    Game.setAuto(!goOwner, !jumpOwner);
+    stGo.textContent = goOwner ? 'taken' : 'free';
+    stGo.className = 'state' + (goOwner ? ' taken' : '');
+    stJump.textContent = jumpOwner ? 'taken' : 'free';
+    stJump.className = 'state' + (jumpOwner ? ' taken' : '');
+  }
+
+  ref.child('go').on('value', function (s) {
+    var v = s.val();
+    goOwner = v && v.owner ? v.owner : null;
+    var down = !!(v && v.down);
+    if (down && !goIsDown) Game.goDown();
+    if (!down && goIsDown) Game.goUp();
+    goIsDown = down;
+    refresh();
+  });
+
+  ref.child('jump').on('value', function (s) {
+    var v = s.val();
+    jumpOwner = v && v.owner ? v.owner : null;
+    var n = v && v.n ? v.n : null;
+    if (!firstJump && n && n !== lastN) Game.jumpDown();
+    lastN = n; firstJump = false;
+    refresh();
+  });
+
+  refresh();
+})();
+</script>
+</body>
+</html>
