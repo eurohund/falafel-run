@@ -15,6 +15,11 @@ A two-player runner for a TV. The game runs on the big screen, phones are the co
 - If a role is free, a bot plays it, so one person can play alone.
 - A giant falafel rolls behind and speeds up. Caught means game over.
 
+## Two feet mode
+
+Open `index.html?m=legs`. Each phone is one foot: tap in turns to run, press together to jump.
+The same foot twice in a row makes the character stumble.
+
 ## Setup
 
 1. Firebase console: create a project, add a Realtime Database, paste `database.rules.json` into Rules.

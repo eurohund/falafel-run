@@ -68,6 +68,8 @@
   .state { display: inline-block; margin-top: 1.2vh; padding: .6vh 1.6vh; border-radius: 999px; font-weight: 800; font-size: 2.2vh; background: rgba(255,244,230,.14); }
   .state.taken { background: var(--ink); color: var(--night); }
   #mid { text-align: center; font-size: 2.4vh; font-weight: 500; opacity: .8; max-width: 26vw; }
+  #mid a { color: var(--ink); display: inline-block; margin-top: 1vh; font-weight: 800; }
+  #mid a:focus-visible { outline: 3px solid var(--hero); outline-offset: 3px; }
   #mid b { display: block; font-family: var(--display); font-weight: 400; font-size: 3vh; opacity: 1; margin-bottom: .8vh; }
 </style>
 </head>
@@ -96,7 +98,7 @@
         <span class="state" id="stGo">free</span>
       </div>
     </div>
-    <div id="mid"><b id="midTitle">Scan to play</b><span id="midText">A taken code can be stolen: just scan it.</span></div>
+    <div id="mid"><b id="midTitle">Scan to play</b><span id="midText">A taken code can be stolen: just scan it.</span><br><a id="modeLink" href="?m=legs">Try the other mode: Two feet</a></div>
     <div class="role right">
       <div class="qr" id="qrJump"></div>
       <div>
@@ -118,6 +120,18 @@
   var stGo = document.getElementById('stGo'), stJump = document.getElementById('stJump');
   var midTitle = document.getElementById('midTitle'), midText = document.getElementById('midText');
 
+  var mode = /[?&]m=legs/.test(location.search) ? 'legs' : 'classic';
+  if (mode === 'legs') {
+    Game.setMode('legs');
+    var h = document.querySelectorAll('.role h2'), t = document.querySelectorAll('.role p');
+    h[0].textContent = 'LEFT'; h[1].textContent = 'RIGHT';
+    t[0].textContent = 'You are the left foot'; t[1].textContent = 'You are the right foot';
+    document.getElementById('msgText').textContent = 'Two feet, two phones. Tap in turns to run. Press together to jump.';
+    document.getElementById('msgHint').textContent = 'Alone? The bot is your other foot. Hold to jump.';
+    var ml = document.getElementById('modeLink');
+    ml.textContent = 'Try the other mode: Go and Jump'; ml.setAttribute('href', './');
+  }
+
   // Room code: stays the same across reloads of this TV.
   var room = null;
   try { room = localStorage.getItem('falafel-room'); } catch (e) {}
@@ -127,7 +141,7 @@
   }
 
   var base = location.href.split('#')[0].split('?')[0].replace(/[^\/]*$/, '');
-  function padUrl(k) { return base + 'pad.html?r=' + room + '&k=' + k; }
+  function padUrl(k) { return base + 'pad.html?r=' + room + '&k=' + k + (mode === 'legs' ? '&m=legs' : ''); }
   function renderQr(el, url) {
     try {
       var qr = qrcode(0, 'M'); qr.addData(url); qr.make();
@@ -140,13 +154,13 @@
   var cfg = window.FIREBASE_CONFIG;
   if (!cfg || !cfg.databaseURL || typeof firebase === 'undefined') {
     midTitle.textContent = 'Phones are not linked yet';
-    midText.textContent = 'Fill in firebase-config.js. Keyboard works: Right arrow and Space.';
+    midText.textContent = mode === 'legs' ? 'Keyboard works: Left and Right arrows.' : 'Fill in firebase-config.js. Keyboard works: Right arrow and Space.';
     return;
   }
 
   firebase.initializeApp(cfg);
   var ref = firebase.database().ref('rooms/' + room);
-  var goOwner = null, jumpOwner = null, goIsDown = false, lastN = null, firstJump = true;
+  var goOwner = null, jumpOwner = null, goIsDown = false, jumpIsDown = false, lastN = null, firstJump = true;
 
   function refresh() {
     Game.setAuto(!goOwner, !jumpOwner);
@@ -160,8 +174,8 @@
     var v = s.val();
     goOwner = v && v.owner ? v.owner : null;
     var down = !!(v && v.down);
-    if (down && !goIsDown) Game.goDown();
-    if (!down && goIsDown) Game.goUp();
+    if (down && !goIsDown) { if (mode === 'legs') Game.footDown('L'); else Game.goDown(); }
+    if (!down && goIsDown) { if (mode === 'legs') Game.footUp('L'); else Game.goUp(); }
     goIsDown = down;
     refresh();
   });
@@ -170,7 +184,12 @@
     var v = s.val();
     jumpOwner = v && v.owner ? v.owner : null;
     var n = v && v.n ? v.n : null;
-    if (!firstJump && n && n !== lastN) Game.jumpDown();
+    if (mode === 'legs') {
+      var d = !!(v && v.down);
+      if (d && !jumpIsDown) Game.footDown('R');
+      if (!d && jumpIsDown) Game.footUp('R');
+      jumpIsDown = d;
+    } else if (!firstJump && n && n !== lastN) Game.jumpDown();
     lastN = n; firstJump = false;
     refresh();
   });

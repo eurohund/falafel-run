@@ -38,6 +38,8 @@
   var p, c, bins, rollers, presses, nextX, startX, elapsed, rollerTimer, overAt, shownM = -1;
   var input = { go: false, jumpBuf: 0 };
   var auto = { go: false, jump: false }; // a bot plays whichever role nobody took
+  var mode = 'classic'; // 'classic': GO + JUMP. 'legs': two feet, tap in turns to run, press together to jump.
+  var legs = { v: 0, last: null, down: { L: false, R: false }, held: { L: 0, R: 0 }, botAt: 0, botFoot: null, jumped: false };
   var best = 0;
   try { best = parseInt(localStorage.getItem('falafel-best') || '0', 10) || 0; } catch (e) {}
 
@@ -50,6 +52,7 @@
     bins = []; rollers = []; presses = [];
     startX = 0; nextX = 260; elapsed = 0; rollerTimer = 6; shownM = -1;
     input.jumpBuf = 0;
+    legs.v = 0; legs.last = null; legs.botAt = 0;
   }
 
   function meters() { return Math.max(0, Math.floor((p.x - startX) / UNIT_PER_M)); }
@@ -57,7 +60,7 @@
   function spawn() {
     var d = (nextX - startX) / UNIT_PER_M;
     var r = Math.random(), w;
-    if (d > 40 && r < 0.22) { w = 38; presses.push({ x: nextX, w: w, ph: Math.random() * PRESS_CYCLE }); }
+    if (mode !== 'legs' && d > 40 && r < 0.22) { w = 38; presses.push({ x: nextX, w: w, ph: Math.random() * PRESS_CYCLE }); }
     else if (r < 0.52) { w = 26; bins.push({ x: nextX, w: w, h: 34, k: 0 }); }
     else if (r < 0.74) { w = 26; bins.push({ x: nextX, w: w, h: 54, k: 1 }); }
     else { w = 58; bins.push({ x: nextX, w: w, h: 30, k: 2 }); }
@@ -77,6 +80,40 @@
   }
 
   function overlapX(x, o) { return x + PW / 2 > o.x && x - PW / 2 < o.x + o.w; }
+
+  // ---------- legs mode ----------
+  function legStep(foot) {
+    if (legs.last !== foot) legs.v = Math.min(190, legs.v + 30);   // feet in turns: speed up
+    else legs.v *= 0.55;                                            // same foot twice: stumble
+    legs.last = foot;
+    p.walk = foot === 'L' ? Math.PI / 2 : -Math.PI / 2;
+  }
+  function footDown(foot) {
+    var other = foot === 'L' ? 'R' : 'L';
+    if (state === 'ready') { state = 'play'; setMsg(null); }
+    anyPress();
+    legs.down[foot] = true; legs.held[foot] = 0; legs.jumped = false;
+    if (legs.down[other]) { input.jumpBuf = 0.15; legs.jumped = true; return; }   // both feet down: jump
+    legStep(foot);
+    var otherIsBot = other === 'L' ? auto.go : auto.jump;
+    if (otherIsBot) { legs.botFoot = other; legs.botAt = 0.16; }
+  }
+  function footUp(foot) { legs.down[foot] = false; }
+  function legsTick(dt) {
+    legs.v -= legs.v * 0.9 * dt;
+    if (legs.v < 2) legs.v = 0;
+    if (legs.botAt > 0) {
+      legs.botAt -= dt;
+      if (legs.botAt <= 0 && legs.botFoot) legStep(legs.botFoot);
+    }
+    // playing alone: hold your foot down and the bot foot joins in for a jump
+    ['L', 'R'].forEach(function (f) {
+      if (!legs.down[f]) return;
+      legs.held[f] += dt;
+      var otherIsBot = f === 'L' ? auto.jump : auto.go;
+      if (otherIsBot && !legs.jumped && legs.held[f] > 0.22) { input.jumpBuf = 0.15; legs.jumped = true; }
+    });
+  }
 
   // ---------- bot for a free role ----------
   function autoGoOk() {
@@ -134,10 +171,12 @@
 
     // horizontal
     var vx = 0;
-    if (p.stun > 0) { vx = -170; p.stun -= dt; }
+    if (mode === 'legs') legsTick(dt);
+    if (p.stun > 0) { vx = -170; p.stun -= dt; legs.v = 0; }
+    else if (mode === 'legs') vx = legs.v;
     else if (input.go || (auto.go && autoGoOk())) vx = SPEED;
     if (p.invul > 0) p.invul -= dt;
-    p.moving = vx > 0;
+    p.moving = vx > 4;
     var nx = p.x + vx * dt, i, b, pr, pb;
 
     for (i = 0; i < bins.length; i++) {
@@ -155,7 +194,7 @@
       }
     }
     p.x = nx;
-    if (p.moving && p.grounded) p.walk += dt * 16;
+    if (mode !== 'legs' && p.moving && p.grounded) p.walk += dt * 16;
 
     // vertical
     var floor = 0;
@@ -163,7 +202,7 @@
       b = bins[i];
       if (overlapX(p.x, b) && p.alt >= b.h - 3) floor = Math.max(floor, b.h);
     }
-    if (auto.jump && p.grounded && p.stun <= 0 && needJump(vx)) input.jumpBuf = 0.1;
+    if (mode !== 'legs' && auto.jump && p.grounded && p.stun <= 0 && needJump(vx)) input.jumpBuf = 0.1;
     if (input.jumpBuf > 0) input.jumpBuf -= dt;
     if (input.jumpBuf > 0 && p.coyote > 0 && p.stun <= 0) {
       p.vy = JUMP; p.coyote = 0; input.jumpBuf = 0; p.grounded = false;
@@ -205,7 +244,7 @@
     }
 
     // chaser
-    c.v = Math.min(175, 80 + elapsed * 0.9);
+    c.v = mode === 'legs' ? Math.min(150, 60 + elapsed * 0.8) : Math.min(175, 80 + elapsed * 0.9);
     c.x += c.v * dt;
     if (c.x < p.x - 300) c.x = p.x - 300;
     c.rot = c.x / R;
@@ -332,7 +371,7 @@
     var px = p.x, py = GY - p.alt;
     var st = clamp(p.vy / 900, -0.25, 0.25);
     var bh = 26 * (1 + st), bwid = PW * (1 - st * 0.5);
-    var a = (p.grounded && p.moving) ? Math.sin(p.walk) * 5 : (p.grounded ? 0 : 3);
+    var a = (p.grounded && (p.moving || mode === 'legs')) ? Math.sin(p.walk) * 5 : (p.grounded ? 0 : 3);
     // legs
     ctx.strokeStyle = '#e0a800'; ctx.lineWidth = 4; ctx.lineCap = 'round';
     ctx.beginPath();
@@ -456,10 +495,20 @@
 
   window.addEventListener('keydown', function (e) {
     if (e.repeat) return;
+    if (mode === 'legs') {
+      if (e.code === 'ArrowLeft') { footDown('L'); e.preventDefault(); }
+      if (e.code === 'ArrowRight') { footDown('R'); e.preventDefault(); }
+      return;
+    }
     if (e.code === 'ArrowRight' || e.code === 'KeyD') { elGo.classList.add('on'); goDown(); e.preventDefault(); }
     if (e.code === 'Space' || e.code === 'Enter' || e.code === 'ArrowUp' || e.code === 'KeyW') { elJump.classList.add('on'); jumpDown(); e.preventDefault(); }
   });
   window.addEventListener('keyup', function (e) {
+    if (mode === 'legs') {
+      if (e.code === 'ArrowLeft') footUp('L');
+      if (e.code === 'ArrowRight') footUp('R');
+      return;
+    }
     if (e.code === 'ArrowRight' || e.code === 'KeyD') { elGo.classList.remove('on'); goUp(); }
     if (e.code === 'Space' || e.code === 'Enter' || e.code === 'ArrowUp' || e.code === 'KeyW') { elJump.classList.remove('on'); }
   });
@@ -469,7 +518,9 @@
   // ---------- API for the TV page ----------
   window.Game = {
     goDown: goDown, goUp: goUp, jumpDown: jumpDown,
-    setAuto: function (go, jump) { auto.go = !!go; auto.jump = !!jump; }
+    setAuto: function (go, jump) { auto.go = !!go; auto.jump = !!jump; },
+    footDown: footDown, footUp: footUp,
+    setMode: function (m) { mode = m === 'legs' ? 'legs' : 'classic'; if (mode === 'legs') presses = []; }
   };
 
   // ---------- loop ----------

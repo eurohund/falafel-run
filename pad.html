@@ -63,6 +63,8 @@
   var q = new URLSearchParams(location.search);
   var room = (q.get('r') || '').toLowerCase();
   var role = q.get('k') === 'jump' ? 'jump' : 'go';
+  var legsMode = q.get('m') === 'legs';   // two feet: both pads send press and release
+  var holds = role === 'go' || legsMode;
   var btn = document.getElementById('btn'), label = document.getElementById('label');
   var statusEl = document.getElementById('status');
 
@@ -70,7 +72,8 @@
     document.body.classList.add('jump');
     document.getElementById('iconPath').setAttribute('d', 'M19 42V22H8L24 4l16 18H29v20z');
   }
-  var NAME = role === 'jump' ? 'JUMP' : 'GO';
+  var NAME = legsMode ? (role === 'jump' ? 'RIGHT' : 'LEFT') : (role === 'jump' ? 'JUMP' : 'GO');
+  if (legsMode) document.getElementById('iconPath').setAttribute('d', 'M24 5c6 0 10 6 10 14 0 6-3 9-3 14 0 6-3 10-7 10s-7-4-7-10c0-5-3-8-3-14C14 11 18 5 24 5z');
   label.textContent = NAME;
   document.addEventListener('contextmenu', function (e) { e.preventDefault(); });
 
@@ -92,7 +95,7 @@
   function ui() {
     if (!connected) { statusEl.textContent = 'Connecting…'; label.textContent = NAME; return; }
     if (mine) {
-      statusEl.textContent = role === 'go' ? 'You drive. Hold the button.' : 'You jump. Tap the button.';
+      statusEl.textContent = legsMode ? 'Tap in turns to run. Press together to jump.' : (role === 'go' ? 'You drive. Hold the button.' : 'You jump. Tap the button.');
       label.textContent = NAME;
     } else if (!wantIt) {
       statusEl.textContent = 'Someone took your button';
@@ -142,12 +145,12 @@
     if (!wantIt) { claim(); buzz(30); return; }
     if (!mine) return;
     btn.classList.add('on'); buzz(15);
-    if (role === 'go') { down = true; node.child('down').set(true); }
+    if (holds) { down = true; node.child('down').set(true); }
     else node.child('n').set(Date.now());
   }
   function release() {
     btn.classList.remove('on');
-    if (role === 'go' && down) { down = false; if (mine) node.child('down').set(false); }
+    if (holds && down) { down = false; if (mine) node.child('down').set(false); }
   }
   btn.addEventListener('pointerdown', press);
   btn.addEventListener('pointerup', release);
